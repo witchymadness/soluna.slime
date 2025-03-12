@@ -1,8 +1,9 @@
 // Matter.js module aliases
-const { Engine, Render, World, Bodies, Mouse, MouseConstraint, Composite } = Matter;
+const { Engine, Render, World, Bodies, Mouse, MouseConstraint, Composite, Constraint } = Matter;
 
 // Create engine and world
 const engine = Engine.create();
+engine.world.gravity.y = 0.1; // Adjusted gravity for a floating effect
 const world = engine.world;
 
 // Create renderer
@@ -20,44 +21,69 @@ const render = Render.create({
 
 // Create soft body (slime)
 const slime = [];
-const rows = 5, cols = 6;
+const rows = 40, cols = 60; // Reduced number of particles for performance
 const startX = window.innerWidth / 2 - 100;
 const startY = window.innerHeight / 2 - 100;
-const radius = 20;
+const radius = 3; // Slightly larger radius to compensate for fewer particles
 
 // Create particles for the slime
 for (let i = 0; i < rows; i++) {
     for (let j = 0; j < cols; j++) {
-        const circle = Bodies.circle(startX + j * (radius * 1.5), startY + i * (radius * 1.5), radius, {
-            restitution: 0.8,
+        const circle = Bodies.circle(startX + j * (radius * 1.2), startY + i * (radius * 1.2), radius, {
+            restitution: 0.6,
             friction: 0.1,
-            render: { fillStyle: "#66bb6a" }
+            render: { fillStyle: "#66bb6a" },
+            isSleeping: false // Helps with optimization
         });
         slime.push(circle);
     }
 }
 
-// Create soft body constraints (joints)
-for (let i = 0; i < slime.length; i++) {
-    for (let j = i + 1; j < slime.length; j++) {
-        if (Matter.Vector.magnitude(Matter.Vector.sub(slime[i].position, slime[j].position)) < radius * 2) {
-            const constraint = Matter.Constraint.create({
-                bodyA: slime[i],
-                bodyB: slime[j],
-                stiffness: 0.5,
-                damping: 0.1
-            });
-            World.add(world, constraint);
+// Create soft body constraints (only to adjacent particles for efficiency)
+for (let i = 0; i < rows; i++) {
+    for (let j = 0; j < cols; j++) {
+        const index = i * cols + j;
+        if (j < cols - 1) { // Horizontal connections
+            World.add(world, Constraint.create({
+                bodyA: slime[index],
+                bodyB: slime[index + 1],
+                stiffness: 0.3,
+                damping: 0.3,
+                render: { visible: false }
+            }));
+        }
+        if (i < rows - 1) { // Vertical connections
+            World.add(world, Constraint.create({
+                bodyA: slime[index],
+                bodyB: slime[index + cols],
+                stiffness: 0.3,
+                damping: 0.3,
+                render: { visible: false }
+            }));
         }
     }
 }
 
-// Add ground
-const ground = Bodies.rectangle(window.innerWidth / 2, window.innerHeight, window.innerWidth, 20, {
+// Add walls, ceiling, and ground
+const wallThickness = 20;
+const ground = Bodies.rectangle(window.innerWidth / 2, window.innerHeight, window.innerWidth, wallThickness, {
     isStatic: true,
     render: { fillStyle: "#388e3c" }
 });
-World.add(world, ground);
+const ceiling = Bodies.rectangle(window.innerWidth / 2, 0, window.innerWidth, wallThickness, {
+    isStatic: true,
+    render: { fillStyle: "#388e3c" }
+});
+const leftWall = Bodies.rectangle(0, window.innerHeight / 2, wallThickness, window.innerHeight, {
+    isStatic: true,
+    render: { fillStyle: "#388e3c" }
+});
+const rightWall = Bodies.rectangle(window.innerWidth, window.innerHeight / 2, wallThickness, window.innerHeight, {
+    isStatic: true,
+    render: { fillStyle: "#388e3c" }
+});
+
+World.add(world, [ground, ceiling, leftWall, rightWall]);
 
 // Add mouse control
 const mouse = Mouse.create(render.canvas);
@@ -70,7 +96,6 @@ const mouseConstraint = MouseConstraint.create(engine, {
 });
 World.add(world, mouseConstraint);
 
-// Add all bodies to world
 World.add(world, slime);
 
 // Run the engine and renderer
