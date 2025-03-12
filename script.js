@@ -21,10 +21,10 @@ const render = Render.create({
 
 // Create soft body (slime)
 const slime = [];
-const rows = 40, cols = 60; // Reduced number of particles for performance
+const rows = 30, cols = 50; // Reduced number of particles for performance
 const startX = window.innerWidth / 2 - 100;
 const startY = window.innerHeight / 2 - 100;
-const radius = 3; // Slightly larger radius to compensate for fewer particles
+const radius = 5; // Slightly larger radius to compensate for fewer particles
 
 // Create particles for the slime
 for (let i = 0; i < rows; i++) {
@@ -64,26 +64,23 @@ for (let i = 0; i < rows; i++) {
     }
 }
 
-// Add walls, ceiling, and ground
-const wallThickness = 20;
-const ground = Bodies.rectangle(window.innerWidth / 2, window.innerHeight, window.innerWidth, wallThickness, {
-    isStatic: true,
-    render: { fillStyle: "#388e3c" }
-});
-const ceiling = Bodies.rectangle(window.innerWidth / 2, 0, window.innerWidth, wallThickness, {
-    isStatic: true,
-    render: { fillStyle: "#388e3c" }
-});
-const leftWall = Bodies.rectangle(0, window.innerHeight / 2, wallThickness, window.innerHeight, {
-    isStatic: true,
-    render: { fillStyle: "#388e3c" }
-});
-const rightWall = Bodies.rectangle(window.innerWidth, window.innerHeight / 2, wallThickness, window.innerHeight, {
-    isStatic: true,
-    render: { fillStyle: "#388e3c" }
-});
+// Function to create walls
+let walls = [];
+const createWalls = () => {
+    // Remove existing walls
+    World.remove(world, walls);
+    walls = [];
 
-World.add(world, [ground, ceiling, leftWall, rightWall]);
+    const wallThickness = 20;
+    walls.push(Bodies.rectangle(window.innerWidth / 2, window.innerHeight, window.innerWidth, wallThickness, { isStatic: true, render: { fillStyle: "#388e3c" } })); // Ground
+    walls.push(Bodies.rectangle(window.innerWidth / 2, 0, window.innerWidth, wallThickness, { isStatic: true, render: { fillStyle: "#388e3c" } })); // Ceiling
+    walls.push(Bodies.rectangle(0, window.innerHeight / 2, wallThickness, window.innerHeight, { isStatic: true, render: { fillStyle: "#388e3c" } })); // Left Wall
+    walls.push(Bodies.rectangle(window.innerWidth, window.innerHeight / 2, wallThickness, window.innerHeight, { isStatic: true, render: { fillStyle: "#388e3c" } })); // Right Wall
+
+    World.add(world, walls);
+};
+
+createWalls();
 
 // Add mouse control
 const mouse = Mouse.create(render.canvas);
@@ -102,8 +99,9 @@ World.add(world, slime);
 Engine.run(engine);
 Render.run(render);
 
-// Adjust canvas on resize
+// Adjust canvas and walls on resize
 window.addEventListener("resize", () => {
     render.canvas.width = window.innerWidth;
     render.canvas.height = window.innerHeight;
+    createWalls();
 });
