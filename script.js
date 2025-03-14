@@ -1,5 +1,62 @@
 // Matter.js module aliases
 const { Engine, Render, World, Bodies, Mouse, MouseConstraint, Composite, Constraint } = Matter;
+// Enable multi-touch interactions
+let touches = {};
+
+// Function to find the closest slime particle to a touch point
+function getClosestParticle(x, y) {
+    let closest = null;
+    let minDist = Infinity;
+
+    slime.forEach(particle => {
+        let dx = particle.position.x - x;
+        let dy = particle.position.y - y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDist) {
+            minDist = dist;
+            closest = particle;
+        }
+    });
+
+    return closest;
+}
+
+// Handle touch start
+window.addEventListener("touchstart", (event) => {
+    for (let touch of event.touches) {
+        const closest = getClosestParticle(touch.clientX, touch.clientY);
+        if (closest) {
+            touches[touch.identifier] = { body: closest, x: touch.clientX, y: touch.clientY };
+        }
+    }
+});
+
+// Handle touch move (apply forces)
+window.addEventListener("touchmove", (event) => {
+    for (let touch of event.touches) {
+        const touchData = touches[touch.identifier];
+        if (touchData) {
+            let dx = touch.clientX - touchData.x;
+            let dy = touch.clientY - touchData.y;
+
+            Matter.Body.applyForce(touchData.body, touchData.body.position, {
+                x: dx * 0.001,  // Scale force for realistic effect
+                y: dy * 0.001
+            });
+
+            // Update stored touch position
+            touches[touch.identifier].x = touch.clientX;
+            touches[touch.identifier].y = touch.clientY;
+        }
+    }
+});
+
+// Handle touch end (remove tracking)
+window.addEventListener("touchend", (event) => {
+    for (let touch of event.changedTouches) {
+        delete touches[touch.identifier];
+    }
+});
 
 // Create engine and world
 const engine = Engine.create();
