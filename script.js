@@ -1,176 +1,115 @@
-// Matter.js module aliases
-const { Engine, Render, World, Bodies, Mouse, MouseConstraint, Composite, Constraint } = Matter;
-// Enable multi-touch interactions
-let touches = {};
+import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.18.0/dist/cannon-es.js";
+import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.min.js";
 
-// Function to find the closest slime particle to a touch point
-function getClosestParticle(x, y) {
-    let closest = null;
-    let minDist = Infinity;
+// Initialize scene, camera, and renderer
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("slimeCanvas"), antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
 
-    slime.forEach(particle => {
-        let dx = particle.position.x - x;
-        let dy = particle.position.y - y;
-        let dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < minDist) {
-            minDist = dist;
-            closest = particle;
-        }
-    });
+// Background color
+scene.background = new THREE.Color(0xfff8e1);
 
-    return closest;
-}
+// Cannon.js physics world
+const world = new CANNON.World();
+world.gravity.set(0, -9.81, 0);
 
-// Handle touch start
-window.addEventListener("touchstart", (event) => {
-    for (let touch of event.touches) {
-        const closest = getClosestParticle(touch.clientX, touch.clientY);
-        if (closest) {
-            touches[touch.identifier] = { body: closest, x: touch.clientX, y: touch.clientY };
-        }
-    }
+// Slime properties
+const slimeRadius = 2;
+const slimeBody = new CANNON.Body({
+    mass: 1,
+    shape: new CANNON.Sphere(slimeRadius),
+    position: new CANNON.Vec3(0, 5, 0),
+    material: new CANNON.Material({ restitution: 0.5 }),
 });
+world.addBody(slimeBody);
 
-// Handle touch move (apply forces)
-window.addEventListener("touchmove", (event) => {
-    for (let touch of event.touches) {
-        const touchData = touches[touch.identifier];
-        if (touchData) {
-            let dx = touch.clientX - touchData.x;
-            let dy = touch.clientY - touchData.y;
+// Create deformable slime mesh
+const geometry = new THREE.SphereGeometry(slimeRadius, 32, 32);
+const originalVertices = geometry.attributes.position.array.slice(); // Store original vertex positions
+const slimeMesh = new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({ color: 0x66bb6a, transparent: true, opacity: 0.85, flatShading: true })
+);
+scene.add(slimeMesh);
 
-            Matter.Body.applyForce(touchData.body, touchData.body.position, {
-                x: dx * 0.001,  // Scale force for realistic effect
-                y: dy * 0.001
-            });
-
-            // Update stored touch position
-            touches[touch.identifier].x = touch.clientX;
-            touches[touch.identifier].y = touch.clientY;
-        }
-    }
+// Static Floor (pastel-colored)
+const groundBody = new CANNON.Body({ 
+    mass: 0, 
+    shape: new CANNON.Plane(),
+    position: new CANNON.Vec3(0, 0, 0)
 });
+groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+world.addBody(groundBody);
 
-// Handle touch end (remove tracking)
-window.addEventListener("touchend", (event) => {
-    for (let touch of event.changedTouches) {
-        delete touches[touch.identifier];
-    }
-});
+const groundMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(50, 50),
+    new THREE.MeshStandardMaterial({ color: 0xffcdd2, side: THREE.DoubleSide }) // Light pastel pink
+);
+groundMesh.rotation.x = -Math.PI / 2;
+scene.add(groundMesh);
 
-// Create engine and world
-const engine = Engine.create();
-engine.world.gravity.y = 0.1; // Adjusted gravity for a floating effect
-const world = engine.world;
+// Lighting
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5, 10, 5);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffe0b2, 0.8));
 
-// Create renderer
-const canvas = document.getElementById("slimeCanvas");
-const render = Render.create({
-    canvas: canvas,
-    engine: engine,
-    options: {
-        width: window.innerWidth,
-        height: window.innerHeight,
-        wireframes: false,
-        background: "#e3f2fd"
-    }
-});
+// Camera setup
+camera.position.set(0, 5, 10);
+camera.lookAt(0, 5, 0);
 
-// Create soft body (slime)
-const slime = [];
-const rows = 30, cols = 50;
-const startX = window.innerWidth / 2 - 100;
-const startY = window.innerHeight / 2 - 100;
-const radius = 7;
-let slimeColor = "#66bb6a"; // Default slime color
+// Raycaster for touch interaction
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
 
-// Create particles for the slime
-for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-        const circle = Bodies.circle(startX + j * (radius * 1.2), startY + i * (radius * 1.2), radius, {
-            restitution: 0.7,
-            friction: 0.1,
-            render: { fillStyle: slimeColor },
-            isSleeping: false
-        });
-        slime.push(circle);
+function onPointerMove(event) {
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(slimeMesh);
+    if (intersects.length > 0) {
+        deformSlime(intersects[0].point);
     }
 }
 
-// Create constraints for soft body effect
-for (let i = 0; i < rows; i++) {
-    for (let j = 0; j < cols; j++) {
-        const index = i * cols + j;
-        if (j < cols - 1) {
-            World.add(world, Constraint.create({
-                bodyA: slime[index],
-                bodyB: slime[index + 1],
-                stiffness: 0.3,
-                damping: 0.3,
-                render: { visible: false }
-            }));
-        }
-        if (i < rows - 1) {
-            World.add(world, Constraint.create({
-                bodyA: slime[index],
-                bodyB: slime[index + cols],
-                stiffness: 0.3,
-                damping: 0.3,
-                render: { visible: false }
-            }));
+// Function to stretch the slime at the touched point
+function deformSlime(point) {
+    const positions = geometry.attributes.position.array;
+    for (let i = 0; i < positions.length; i += 3) {
+        let x = positions[i], y = positions[i + 1], z = positions[i + 2];
+        let distance = Math.sqrt((x - point.x) ** 2 + (y - point.y) ** 2 + (z - point.z) ** 2);
+        if (distance < 1) { // Only affect nearby vertices
+            let factor = 1 - distance; // Closer points stretch more
+            positions[i] += (x - point.x) * factor * 0.5;
+            positions[i + 1] += (y - point.y) * factor * 0.5;
+            positions[i + 2] += (z - point.z) * factor * 0.5;
         }
     }
+    geometry.attributes.position.needsUpdate = true;
 }
 
-// Add walls, ceiling, and ground with invisible borders
-const wallThickness = 20;
-const ground = Bodies.rectangle(window.innerWidth / 2, window.innerHeight, window.innerWidth, wallThickness, {
-    isStatic: true,
-    render: { visible: false }
-});
-const ceiling = Bodies.rectangle(window.innerWidth / 2, 0, window.innerWidth, wallThickness, {
-    isStatic: true,
-    render: { visible: false }
-});
-const leftWall = Bodies.rectangle(0, window.innerHeight / 2, wallThickness, window.innerHeight, {
-    isStatic: true,
-    render: { visible: false }
-});
-const rightWall = Bodies.rectangle(window.innerWidth, window.innerHeight / 2, wallThickness, window.innerHeight, {
-    isStatic: true,
-    render: { visible: false }
-});
-
-World.add(world, [ground, ceiling, leftWall, rightWall]);
-
-// Add mouse control
-const mouse = Mouse.create(render.canvas);
-const mouseConstraint = MouseConstraint.create(engine, {
-    mouse: mouse,
-    constraint: {
-        stiffness: 0.2,
-        render: { visible: false }
+// Function to reset slime shape
+function resetSlimeShape() {
+    const positions = geometry.attributes.position.array;
+    for (let i = 0; i < positions.length; i++) {
+        positions[i] += (originalVertices[i] - positions[i]) * 0.05; // Slowly restore shape
     }
-});
-World.add(world, mouseConstraint);
+    geometry.attributes.position.needsUpdate = true;
+}
 
-// Add slime to the world
-World.add(world, slime);
+// Event listeners
+window.addEventListener("mousemove", onPointerMove);
+window.addEventListener("touchmove", (event) => onPointerMove(event.touches[0]));
 
-// Run the engine and renderer
-Engine.run(engine);
-Render.run(render);
+// Animation loop
+function animate() {
+    requestAnimationFrame(animate);
+    world.step(1 / 60);
+    slimeMesh.position.copy(slimeBody.position);
+    resetSlimeShape(); // Continuously restore slime shape
+    renderer.render(scene, camera);
+}
 
-// Adjust canvas on resize
-window.addEventListener("resize", () => {
-    render.canvas.width = window.innerWidth;
-    render.canvas.height = window.innerHeight;
-});
-
-// Color Picker Functionality
-document.getElementById("colorPicker").addEventListener("input", (event) => {
-    slimeColor = event.target.value;
-    slime.forEach(particle => {
-        particle.render.fillStyle = slimeColor;
-    });
-});
+animate();
