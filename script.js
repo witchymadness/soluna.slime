@@ -16,12 +16,12 @@ const world = new CANNON.World();
 world.gravity.set(0, -9.81, 0);
 
 // Slime properties
-const slimeRadius = 3;
+const slimeRadius = 5;
 const slimeBody = new CANNON.Body({
     mass: 1,
     shape: new CANNON.Sphere(slimeRadius),
     position: new CANNON.Vec3(0, 5, 0),
-    material: new CANNON.Material({ restitution: 0.8 }),
+    material: new CANNON.Material({ restitution: 0.7 }),
 });
 world.addBody(slimeBody);
 
@@ -66,15 +66,6 @@ slimeMesh.castShadow = true;
 slimeMesh.receiveShadow = true;
 groundMesh.receiveShadow = true;
 
-// Additional shadow for dips
-const shadowPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 10),
-    new THREE.ShadowMaterial({ opacity: 0.5 })
-);
-shadowPlane.rotation.x = -Math.PI / 2;
-shadowPlane.position.y = 0.1;
-scene.add(shadowPlane);
-
 // Camera setup
 camera.position.set(0, 5, 10);
 camera.lookAt(0, 5, 0);
@@ -98,12 +89,16 @@ function onPointerDown(event) {
 
 function onPointerMove(event) {
     if (!isDragging) return;
+    
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(slimeMesh);
+    
     if (intersects.length > 0) {
-        deformSlime(startPoint, intersects[0].point);
+        stretchSlime(startPoint, intersects[0].point);
+        startPoint = intersects[0].point;  // Update start point for continuous interaction
     }
 }
 
@@ -111,17 +106,22 @@ function onPointerUp() {
     isDragging = false;
 }
 
-function deformSlime(start, end) {
+function stretchSlime(start, end) {
     const positions = geometry.attributes.position.array;
-    let stretchFactor = Math.hypot(end.x - start.x, end.y - start.y, end.z - start.z);
-    let isStretching = stretchFactor > 0.1;
-    
+    const strength = 0.8;  // Increased strength for more stretching
+    const maxEffectDistance = 5.0; // Increased effect range
+
     for (let i = 0; i < positions.length; i += 3) {
-        let distance = Math.sqrt((positions[i] - start.x) ** 2 + (positions[i + 1] - start.y) ** 2 + (positions[i + 2] - start.z) ** 2);
-        if (distance < 1.5) {
-            let factor = Math.exp(-distance * 2); // Smooth exponential decrease
-            positions[i + 1] += isStretching ? factor * 0.5 : -factor * 0.5; // Subtle pull/stretch
-            shadowPlane.material.opacity = Math.min(0.8, shadowPlane.material.opacity + 0.05);
+        let dx = positions[i] - end.x;
+        let dy = positions[i + 1] - end.y;
+        let dz = positions[i + 2] - end.z;
+        let distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        if (distance < maxEffectDistance) {
+            let stretchFactor = Math.sin(distance * Math.PI / maxEffectDistance) * strength;
+            positions[i] += (dx / distance) * stretchFactor;
+            positions[i + 1] += (dy / distance) * stretchFactor;
+            positions[i + 2] += (dz / distance) * stretchFactor;
         }
     }
     geometry.attributes.position.needsUpdate = true;
@@ -130,27 +130,17 @@ function deformSlime(start, end) {
 function resetSlimeShape() {
     const positions = geometry.attributes.position.array;
     for (let i = 0; i < positions.length; i++) {
-        positions[i] += (originalVertices[i] - positions[i]) * 0.05; // Smoother return
+        positions[i] += (originalVertices[i] - positions[i]) * 0.02;
     }
-    shadowPlane.material.opacity = Math.max(0.5, shadowPlane.material.opacity - 0.02);
     geometry.attributes.position.needsUpdate = true;
 }
 
-// Fix touch responsiveness
-window.addEventListener("touchstart", (event) => {
-    event.preventDefault(); // Prevent scrolling
-    onPointerDown(event.touches[0]);
-}, { passive: false });
-
-window.addEventListener("touchmove", (event) => {
-    event.preventDefault(); // Prevent scrolling
-    onPointerMove(event.touches[0]);
-}, { passive: false });
-
-window.addEventListener("touchend", onPointerUp);
 window.addEventListener("mousedown", onPointerDown);
 window.addEventListener("mousemove", onPointerMove);
 window.addEventListener("mouseup", onPointerUp);
+window.addEventListener("touchstart", (event) => onPointerDown(event.touches[0]));
+window.addEventListener("touchmove", (event) => onPointerMove(event.touches[0]));
+window.addEventListener("touchend", onPointerUp);
 
 function animate() {
     requestAnimationFrame(animate);
