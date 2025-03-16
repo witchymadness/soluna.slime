@@ -16,25 +16,28 @@ const world = new CANNON.World();
 world.gravity.set(0, -9.81, 0);
 
 // Slime properties
-const slimeRadius = 2;
+const slimeRadius = 3;
 const slimeBody = new CANNON.Body({
     mass: 1,
     shape: new CANNON.Sphere(slimeRadius),
     position: new CANNON.Vec3(0, 5, 0),
-    material: new CANNON.Material({ restitution: 0.5 }),
+    material: new CANNON.Material({ restitution: 0.8 }),
 });
 world.addBody(slimeBody);
 
 // Create deformable slime mesh
-const geometry = new THREE.SphereGeometry(slimeRadius, 32, 32);
-const originalVertices = geometry.attributes.position.array.slice(); // Store original vertex positions
-const slimeMesh = new THREE.Mesh(
-    geometry,
-    new THREE.MeshStandardMaterial({ color: 0x66bb6a, transparent: true, opacity: 0.85, flatShading: true })
-);
+const geometry = new THREE.SphereGeometry(slimeRadius, 64, 64);
+const originalVertices = geometry.attributes.position.array.slice();
+const material = new THREE.MeshStandardMaterial({ color: 0x66bb6a, transparent: true, opacity: 0.85, flatShading: false, roughness: 0.3 });
+const slimeMesh = new THREE.Mesh(geometry, material);
 scene.add(slimeMesh);
 
-// Static Floor (pastel-colored)
+// Color Picker functionality
+document.getElementById("colorPicker").addEventListener("input", (event) => {
+    material.color.set(event.target.value);
+});
+
+// Static Floor
 const groundBody = new CANNON.Body({ 
     mass: 0, 
     shape: new CANNON.Plane(),
@@ -45,7 +48,7 @@ world.addBody(groundBody);
 
 const groundMesh = new THREE.Mesh(
     new THREE.PlaneGeometry(50, 50),
-    new THREE.MeshStandardMaterial({ color: 0xffcdd2, side: THREE.DoubleSide }) // Light pastel pink
+    new THREE.MeshStandardMaterial({ color: 0xffcdd2, side: THREE.DoubleSide })
 );
 groundMesh.rotation.x = -Math.PI / 2;
 scene.add(groundMesh);
@@ -56,6 +59,22 @@ light.position.set(5, 10, 5);
 scene.add(light);
 scene.add(new THREE.AmbientLight(0xffe0b2, 0.8));
 
+// Add shadow effect
+renderer.shadowMap.enabled = true;
+light.castShadow = true;
+slimeMesh.castShadow = true;
+slimeMesh.receiveShadow = true;
+groundMesh.receiveShadow = true;
+
+// Additional shadow for dips
+const shadowPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(10, 10),
+    new THREE.ShadowMaterial({ opacity: 0.5 })
+);
+shadowPlane.rotation.x = -Math.PI / 2;
+shadowPlane.position.y = 0.1;
+scene.add(shadowPlane);
+
 // Camera setup
 camera.position.set(0, 5, 10);
 camera.lookAt(0, 5, 0);
@@ -63,52 +82,81 @@ camera.lookAt(0, 5, 0);
 // Raycaster for touch interaction
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+let isDragging = false;
+let startPoint = null;
 
-function onPointerMove(event) {
+function onPointerDown(event) {
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObject(slimeMesh);
     if (intersects.length > 0) {
-        deformSlime(intersects[0].point);
+        startPoint = intersects[0].point;
+        isDragging = true;
     }
 }
 
-// Function to stretch the slime at the touched point
-function deformSlime(point) {
+function onPointerMove(event) {
+    if (!isDragging) return;
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObject(slimeMesh);
+    if (intersects.length > 0) {
+        deformSlime(startPoint, intersects[0].point);
+    }
+}
+
+function onPointerUp() {
+    isDragging = false;
+}
+
+function deformSlime(start, end) {
     const positions = geometry.attributes.position.array;
+    let stretchFactor = Math.hypot(end.x - start.x, end.y - start.y, end.z - start.z);
+    let isStretching = stretchFactor > 0.1;
+    
     for (let i = 0; i < positions.length; i += 3) {
-        let x = positions[i], y = positions[i + 1], z = positions[i + 2];
-        let distance = Math.sqrt((x - point.x) ** 2 + (y - point.y) ** 2 + (z - point.z) ** 2);
-        if (distance < 1) { // Only affect nearby vertices
-            let factor = 1 - distance; // Closer points stretch more
-            positions[i] += (x - point.x) * factor * 0.5;
-            positions[i + 1] += (y - point.y) * factor * 0.5;
-            positions[i + 2] += (z - point.z) * factor * 0.5;
+        let distance = Math.sqrt((positions[i] - start.x) ** 2 + (positions[i + 1] - start.y) ** 2 + (positions[i + 2] - start.z) ** 2);
+        if (distance < 1.5) {
+            let factor = Math.exp(-distance * 2); // Smooth exponential decrease
+            positions[i + 1] += isStretching ? factor * 0.5 : -factor * 0.5; // Subtle pull/stretch
+            shadowPlane.material.opacity = Math.min(0.8, shadowPlane.material.opacity + 0.05);
         }
     }
     geometry.attributes.position.needsUpdate = true;
 }
 
-// Function to reset slime shape
 function resetSlimeShape() {
     const positions = geometry.attributes.position.array;
     for (let i = 0; i < positions.length; i++) {
-        positions[i] += (originalVertices[i] - positions[i]) * 0.05; // Slowly restore shape
+        positions[i] += (originalVertices[i] - positions[i]) * 0.05; // Smoother return
     }
+    shadowPlane.material.opacity = Math.max(0.5, shadowPlane.material.opacity - 0.02);
     geometry.attributes.position.needsUpdate = true;
 }
 
-// Event listeners
-window.addEventListener("mousemove", onPointerMove);
-window.addEventListener("touchmove", (event) => onPointerMove(event.touches[0]));
+// Fix touch responsiveness
+window.addEventListener("touchstart", (event) => {
+    event.preventDefault(); // Prevent scrolling
+    onPointerDown(event.touches[0]);
+}, { passive: false });
 
-// Animation loop
+window.addEventListener("touchmove", (event) => {
+    event.preventDefault(); // Prevent scrolling
+    onPointerMove(event.touches[0]);
+}, { passive: false });
+
+window.addEventListener("touchend", onPointerUp);
+window.addEventListener("mousedown", onPointerDown);
+window.addEventListener("mousemove", onPointerMove);
+window.addEventListener("mouseup", onPointerUp);
+
 function animate() {
     requestAnimationFrame(animate);
     world.step(1 / 60);
     slimeMesh.position.copy(slimeBody.position);
-    resetSlimeShape(); // Continuously restore slime shape
+    resetSlimeShape();
     renderer.render(scene, camera);
 }
 
